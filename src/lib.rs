@@ -1,5 +1,5 @@
 pub mod error;
-pub use error::Result;
+pub use error::{Result, Error};
 
 pub mod config;
 pub use config::Config;
@@ -67,6 +67,8 @@ pub async fn init(client: Client, config: &Config) -> Result<()> {
         let table = Table::init(data, None).await?;
         println!("creating table: {} prefix: {}", config.item_name, table_uri);
         table.create_delta_table(&table_uri, partition_columns.clone(), backend_config.clone()).await?;
+    } else {
+        return Err(Error::Custom("no parquet files found for processing".into()));
     }
 
     Ok(())
@@ -211,7 +213,7 @@ fn backend_config(region: Option<&str>, provider: Option<&str>, table_name: Opti
     HashMap::from([
         ("AWS_REGION".to_string(), region.unwrap_or("eu-central-1").to_string()),
         ("AWS_S3_LOCKING_PROVIDER".to_string(), provider.unwrap_or("dynamodb").to_string()),
-        ("DELTA_DYNAMO_TABLE_NAME".to_string(), table_name.unwrap_or("dmg_delta_log").to_string()),
+        ("DELTA_DYNAMO_TABLE_NAME".to_string(), table_name.unwrap_or("delta_log").to_string()),
     ])
 }
 
@@ -316,45 +318,6 @@ impl Table {
         
         Ok(builder.await?)
     }
-
-    // pub async fn to_delta(&self, table_uri: &str, partition_columns: Option<Vec<String>>, backend_config: HashMap<String, String>, key: &str) -> anyhow::Result<()> {
-    //     let mut writer = RecordBatchWriter::try_new(
-    //         table_uri, 
-    //         Arc::new(self.schema.clone()), 
-    //         partition_columns.clone(), 
-    //         None,
-    //     )
-    //         .context(format!("could not create writer for delta table for key: {}", key))?;
-
-    //     let mut delta_table = open_table_with_storage_options(table_uri, backend_config.clone())
-    //         .await
-    //         .context(format!("could not open delta table: {} for key: {}", &table_uri, key))?;   
-
-    //     if let Some(record_batches) = &self.data {
-    //         for record_batch in record_batches {
-    //             println!("writing to writer for key: {}", key);
-    //             writer.write(record_batch.clone())
-    //                 .await
-    //                 .context(format!("could not write to writer for key: {}", key))?; 
-
-    //             println!("commiting tx for key: {}", key);
-    //             let version = writer
-    //                 .flush_and_commit(&mut delta_table)
-    //                 .await
-    //                 .context(format!("could not flush and commit for key: {}", key))?;
-    //             println!("delta version: {}", version);
-
-    //             delta_table.update()
-    //                 .await
-    //                 .context(format!("could not update delta table for key: {}", key))?;
-    //         }
-
-    //     } else {
-    //         println!("no data found to write for delta table");
-    //     }
-        
-    //     Ok(())
-    // }
 
     pub async fn to_delta(&self, table_uri: &str, partition_columns: Option<Vec<String>>, backend_config: HashMap<String, String>, key: &str, checkpoint: Option<usize>) -> Result<()> {
         if let Some(record_batches) = &self.data {
