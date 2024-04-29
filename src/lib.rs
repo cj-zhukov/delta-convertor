@@ -5,7 +5,6 @@ pub mod config;
 pub use config::Config;
 use tokio::task::JoinSet;
 
-use std::time::Instant;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::io::Cursor;
@@ -34,31 +33,11 @@ const DELTA_MAX_RETRIES: usize = 30;
 const ASYNC_WORKERS: usize = 1;
 const DEBUG: bool = false;
 
-pub async fn handler(config: Config) -> Result<()> {
-    if let Some(mode) = WorkMode::new(&config.args.mode) {
-        deltalake::aws::register_handlers(None);
-        let now = Instant::now();
-        println!("start processing item: {}", &config.item_name);
-        let client = get_aws_client().await;
-
-        match mode {
-            WorkMode::Init => {
-                println!("processing mode: {}", mode.value());
-                init(client, &config).await?;
-            }
-            WorkMode::Append => {
-                println!("processing mode: {}", mode.value());
-                process(client, &config).await?;
-            }
-        }
-
-        println!("end processing item: {} elapsed: {:.2?}", &config.item_name, now.elapsed());
-    }
-
-    Ok(())
+pub fn register_handlers() {
+    deltalake::aws::register_handlers(None);
 }
 
-async fn init(client: Client, config: &Config) -> Result<()> {
+pub async fn init(client: Client, config: &Config) -> Result<()> {
     let mut stream = client
         .list_objects_v2()
         .bucket(&config.bucket_source)
@@ -93,7 +72,7 @@ async fn init(client: Client, config: &Config) -> Result<()> {
     Ok(())
 }
 
-async fn process(client: Client, config: &Config) -> Result<()> {
+pub async fn process(client: Client, config: &Config) -> Result<()> {
     println!("reading keys in prefix: {}", config.prefix_source);
     let mut stream = client
         .list_objects_v2()
@@ -194,7 +173,7 @@ async fn processor(
     Ok(())
 }
 
-async fn get_aws_client() -> Client {
+pub async fn get_aws_client() -> Client {
     let region_provider = RegionProviderChain::default_provider().or_else("eu-central-1");
     let config = aws_config::defaults(BehaviorVersion::v2023_11_09()).region(region_provider).load().await;
     let client = Client::from_conf(
@@ -232,7 +211,7 @@ fn backend_config(region: Option<&str>, provider: Option<&str>, table_name: Opti
     HashMap::from([
         ("AWS_REGION".to_string(), region.unwrap_or("eu-central-1").to_string()),
         ("AWS_S3_LOCKING_PROVIDER".to_string(), provider.unwrap_or("dynamodb").to_string()),
-        ("DELTA_DYNAMO_TABLE_NAME".to_string(), table_name.unwrap_or("delta_log").to_string()),
+        ("DELTA_DYNAMO_TABLE_NAME".to_string(), table_name.unwrap_or("dmg_delta_log").to_string()),
     ])
 }
 
@@ -242,7 +221,7 @@ pub enum WorkMode {
 }
 
 impl WorkMode {
-    fn new(name: &str) -> Option<Self> {
+    pub fn new(name: &str) -> Option<Self> {
         match name {
             "append" => Some(Self::Append),
             "init" => Some(Self::Init),
@@ -253,7 +232,7 @@ impl WorkMode {
         }
     }
 
-    fn value(&self) -> &str {
+    pub fn value(&self) -> &str {
         match *self {
             Self::Append => "append",
             Self::Init => "init",
@@ -337,6 +316,45 @@ impl Table {
         
         Ok(builder.await?)
     }
+
+    // pub async fn to_delta(&self, table_uri: &str, partition_columns: Option<Vec<String>>, backend_config: HashMap<String, String>, key: &str) -> anyhow::Result<()> {
+    //     let mut writer = RecordBatchWriter::try_new(
+    //         table_uri, 
+    //         Arc::new(self.schema.clone()), 
+    //         partition_columns.clone(), 
+    //         None,
+    //     )
+    //         .context(format!("could not create writer for delta table for key: {}", key))?;
+
+    //     let mut delta_table = open_table_with_storage_options(table_uri, backend_config.clone())
+    //         .await
+    //         .context(format!("could not open delta table: {} for key: {}", &table_uri, key))?;   
+
+    //     if let Some(record_batches) = &self.data {
+    //         for record_batch in record_batches {
+    //             println!("writing to writer for key: {}", key);
+    //             writer.write(record_batch.clone())
+    //                 .await
+    //                 .context(format!("could not write to writer for key: {}", key))?; 
+
+    //             println!("commiting tx for key: {}", key);
+    //             let version = writer
+    //                 .flush_and_commit(&mut delta_table)
+    //                 .await
+    //                 .context(format!("could not flush and commit for key: {}", key))?;
+    //             println!("delta version: {}", version);
+
+    //             delta_table.update()
+    //                 .await
+    //                 .context(format!("could not update delta table for key: {}", key))?;
+    //         }
+
+    //     } else {
+    //         println!("no data found to write for delta table");
+    //     }
+        
+    //     Ok(())
+    // }
 
     pub async fn to_delta(&self, table_uri: &str, partition_columns: Option<Vec<String>>, backend_config: HashMap<String, String>, key: &str, checkpoint: Option<usize>) -> Result<()> {
         if let Some(record_batches) = &self.data {
