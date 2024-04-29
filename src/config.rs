@@ -1,7 +1,8 @@
+use crate::Result;
+
 use std::fmt::Debug;
 use std::env;
 
-use anyhow::Context;
 use serde::Deserialize;
 
 struct Input {
@@ -14,7 +15,7 @@ struct Input {
 }
 
 impl Input {
-    fn new() -> anyhow::Result<Self> {
+    fn new() -> Result<Self> {
         let bucket_source = env::var("bucket_source")?;
         let bucket_target = env::var("bucket_target")?;
         let prefix_source = env::var("prefix_source")?;
@@ -39,7 +40,7 @@ pub struct Config {
 #[derive(Deserialize, Debug)]
 pub struct Args {
     pub partition_columns: Option<Vec<String>>, // delta table is pationed by these columns
-    pub workers: Option<usize>, // async workers/files count
+    pub workers: Option<usize>, // async workers count
     pub chunk_size: Option<usize>,  // size of recordbatch, 1024 is default
     pub mode: String, // delta-convertor mode init or append
     pub checkpoint: Option<usize>, // create checkpoint after n delta version
@@ -47,8 +48,8 @@ pub struct Args {
 }
 
 impl Config {
-    pub fn new() -> anyhow::Result<Self> {
-        let input = Input::new().context("could not get input for config")?;
+    pub fn new() -> Result<Self> {
+        let input = Input::new()?;
         let args: Args = serde_json::from_str(&input.args)?;
 
         Ok(Self { 

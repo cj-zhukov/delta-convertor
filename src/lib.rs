@@ -1,3 +1,6 @@
+pub mod error;
+pub use error::Result;
+
 pub mod config;
 pub use config::Config;
 use tokio::task::JoinSet;
@@ -13,7 +16,6 @@ use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::operation::get_object::GetObjectOutput;
 use tokio_stream::StreamExt;
-use anyhow::Context;
 use arrow::{
     record_batch::RecordBatch,
     datatypes::Schema,
@@ -32,12 +34,12 @@ const DELTA_MAX_RETRIES: usize = 30;
 const ASYNC_WORKERS: usize = 1;
 const DEBUG: bool = false;
 
-pub async fn handler(config: Config) -> anyhow::Result<()> {
+pub async fn handler(config: Config) -> Result<()> {
     if let Some(mode) = WorkMode::new(&config.args.mode) {
         deltalake::aws::register_handlers(None);
         let now = Instant::now();
         println!("start processing item: {}", &config.item_name);
-        let client = get_aws_client().await?;
+        let client = get_aws_client().await;
 
         match mode {
             WorkMode::Init => {
@@ -56,7 +58,7 @@ pub async fn handler(config: Config) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn init(client: Client, config: &Config) -> anyhow::Result<()> {
+async fn init(client: Client, config: &Config) -> Result<()> {
     let mut stream = client
         .list_objects_v2()
         .bucket(&config.bucket_source)
@@ -66,8 +68,7 @@ async fn init(client: Client, config: &Config) -> anyhow::Result<()> {
         .send();
 
     let mut keys = Vec::new();
-    while let Some(output) = stream.next().await {
-        let objects = output.context(format!("could not get output bucket={} prefix={}", config.bucket_source, config.prefix_source))?;
+    while let Some(objects) = stream.next().await.transpose()? {
         for object in objects.contents().to_owned() {
             if let Some(key) = object.key {
                 if key.ends_with("parquet") {
@@ -92,8 +93,8 @@ async fn init(client: Client, config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn process(client: Client, config: &Config) -> anyhow::Result<()> {
-    println!("reading keys in prefix={}", config.prefix_source);
+async fn process(client: Client, config: &Config) -> Result<()> {
+    println!("reading keys in prefix: {}", config.prefix_source);
     let mut stream = client
         .list_objects_v2()
         .bucket(&config.bucket_source)
@@ -102,8 +103,7 @@ async fn process(client: Client, config: &Config) -> anyhow::Result<()> {
         .send();
 
     let mut keys = Vec::new();
-    while let Some(output) = stream.next().await {
-        let objects = output.context(format!("could not get output bucket={} prefix={}", config.bucket_source, config.prefix_source))?;
+    while let Some(objects) = stream.next().await.transpose()? {
         for object in objects.contents().to_owned() {
             if let Some(key) = object.key {
                 if key.ends_with("parquet") {
@@ -160,9 +160,9 @@ async fn process(client: Client, config: &Config) -> anyhow::Result<()> {
             match res {
                 Ok(res) => match res {
                     Ok(_) => (),
-                    Err(e) => println!("could not write to delta table: {}", e),
+                    Err(e) => println!("failed writing to delta table: {}", e),
                 }
-                Err(e) => println!("could not run task: {}", e),
+                Err(e) => eprintln!("failed running tokio task: {}", e),
             }
         }
     }
@@ -180,7 +180,7 @@ async fn processor(
     chunk_size: Option<usize>,
     checkpoint: Option<usize>,
     debug: Option<bool>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
     println!("reading parquet file: {}", key);
     let data = read_file(client.clone(), &bucket, &key).await?;
     println!("creating data table from file: {}", key);
@@ -194,7 +194,7 @@ async fn processor(
     Ok(())
 }
 
-async fn get_aws_client() -> anyhow::Result<Client> {
+async fn get_aws_client() -> Client {
     let region_provider = RegionProviderChain::default_provider().or_else("eu-central-1");
     let config = aws_config::defaults(BehaviorVersion::v2023_11_09()).region(region_provider).load().await;
     let client = Client::from_conf(
@@ -204,25 +204,24 @@ async fn get_aws_client() -> anyhow::Result<Client> {
             .build()
     );
 
-    Ok(client)
+    client
 }
 
-async fn get_file(client: Client, bucket: &str, key: &str) -> anyhow::Result<GetObjectOutput> {
+async fn get_file(client: Client, bucket: &str, key: &str) -> Result<GetObjectOutput> {
     let resp = client
         .get_object()
         .bucket(bucket)
         .key(key)
         .send()
-        .await
-        .context(format!("could not get object output for bucket: {} key: {}", bucket, key))?;
+        .await?;
 
     Ok(resp)
 } 
 
-async fn read_file(client: Client, bucket: &str, key: &str) -> anyhow::Result<Vec<u8>> {
+async fn read_file(client: Client, bucket: &str, key: &str) -> Result<Vec<u8>> {
     let mut buf = Vec::new();
     let mut object = get_file(client, bucket, key).await?;
-    while let Some(bytes) = object.body.try_next().await.context(format!("could not read data from stream bucket: {} key: {}", bucket, key))? {
+    while let Some(bytes) = object.body.try_next().await? {
         buf.extend(bytes.to_vec());
     }
 
@@ -283,22 +282,19 @@ impl Table {
         println!("Schema: {:?}", &self.schema);
     }
 
-    pub async fn new(data: Vec<u8>, chunk_size: Option<usize>) -> anyhow::Result<Self> {
+    pub async fn new(data: Vec<u8>, chunk_size: Option<usize>) -> Result<Self> {
         let chunk_size = chunk_size.unwrap_or(1024);
         let cursor = Cursor::new(data);
         let mut reader = ParquetRecordBatchStreamBuilder::new(cursor)
-            .await
-            .context(format!("could not create async parquet reader"))?
+            .await?
             .with_batch_size(chunk_size)
-            .build()
-            .context(format!("could not create async parquet stream"))?;
+            .build()?;
 
         let schema = reader.schema().deref().clone();
 
         let mut data: Vec<RecordBatch> = Vec::new();
         let mut rows = 0;
-        while let Some(maybe_batch) = reader.next().await {
-            let record_batch = maybe_batch.context(format!("could not get record_batch"))?;                
+        while let Some(record_batch) = reader.next().await.transpose()? {            
                 rows += record_batch.num_rows();
                 data.push(record_batch);
         }
@@ -307,27 +303,22 @@ impl Table {
         Ok(Self { schema, data: Some(data), rows: Some(rows), columns: Some(columns), chunk_size: Some(chunk_size) })
     }
 
-    pub async fn init(data: Vec<u8>, chunk_size: Option<usize>) -> anyhow::Result<Self> {
+    pub async fn init(data: Vec<u8>, chunk_size: Option<usize>) -> Result<Self> {
         let chunk_size = chunk_size.unwrap_or(1024);
         let cursor = Cursor::new(data);
         let reader = ParquetRecordBatchStreamBuilder::new(cursor)
-            .await
-            .context(format!("could not create async parquet reader"))?
+            .await?
             .with_batch_size(chunk_size)
-            .build()
-            .context(format!("could not create async parquet stream"))?;
+            .build()?;
 
         let schema = reader.schema().deref().clone();
 
         Ok(Self { schema, data: None, rows: None, columns: None, chunk_size: None })
     }
     
-    async fn create_delta_table(&self, table_uri: &str, partition_columns: Option<Vec<String>>, backend_config: HashMap<String, String>) -> anyhow::Result<DeltaTable> {
-        let delta_schema = <deltalake::kernel::Schema as TryFrom<&Schema>>::try_from(&self.schema)
-            .context("failed to convert arrow schema to delta schema")?;
-
+    async fn create_delta_table(&self, table_uri: &str, partition_columns: Option<Vec<String>>, backend_config: HashMap<String, String>) -> Result<DeltaTable> {
+        let delta_schema = <deltalake::kernel::Schema as TryFrom<&Schema>>::try_from(&self.schema)?;
         let fields = delta_schema.fields().to_owned();
-
         let builder = match partition_columns {
             Some(cols) => {
                 CreateBuilder::new()
@@ -344,27 +335,20 @@ impl Table {
             }
         };
         
-        Ok(builder.await.context("could not create delta table")?)
+        Ok(builder.await?)
     }
 
-    pub async fn to_delta(&self, table_uri: &str, partition_columns: Option<Vec<String>>, backend_config: HashMap<String, String>, key: &str, checkpoint: Option<usize>) -> anyhow::Result<()> {
+    pub async fn to_delta(&self, table_uri: &str, partition_columns: Option<Vec<String>>, backend_config: HashMap<String, String>, key: &str, checkpoint: Option<usize>) -> Result<()> {
         if let Some(record_batches) = &self.data {
-            let mut writer = RecordBatchWriter::try_new(table_uri, Arc::new(self.schema.clone()), partition_columns.clone(), Some(backend_config.clone()))
-                .context(format!("could not create writer for delta table for key: {}", key))?;
-
-            let mut delta_table = open_table_with_storage_options(table_uri, backend_config.clone())
-                .await
-                .context(format!("could not open delta table: {} for key: {}", &table_uri, key))?;
+            let mut writer = RecordBatchWriter::try_new(table_uri, Arc::new(self.schema.clone()), partition_columns.clone(), Some(backend_config.clone()))?;
+            let mut delta_table = open_table_with_storage_options(table_uri, backend_config.clone()).await?;
 
             for record_batch in record_batches {
-                writer.write(record_batch.clone())
-                    .await
-                    .context(format!("could not write to writer for key: {}", key))?; 
+                writer.write(record_batch.clone()).await?;
                 
                 let action = writer
                     .flush()
-                    .await
-                    .context(format!("could not flush the writer for key: {}", key))?
+                    .await?
                     .iter() 
                     .map(|add| {
                         let clone = add.clone();
@@ -379,26 +363,20 @@ impl Table {
                 };
 
                 println!("commiting transaction for delta table key: {}", key);
-                let snap = delta_table.snapshot().context(format!("could not get snapshot for delta table for key: {}", key))?;
-                let version = commit_with_retries(delta_table.log_store().as_ref(), &action, operation, Some(snap), None, DELTA_MAX_RETRIES)
-                    .await
-                    .context(format!("could not commit transaction for delta table for key: {}", key))?;
-
-                delta_table.update()
-                    .await
-                    .context(format!("could not update delta table for key: {}", key))?;
-
+                let snap = delta_table.snapshot()?;
+                let version = commit_with_retries(delta_table.log_store().as_ref(), &action, operation, Some(snap), None, DELTA_MAX_RETRIES).await?;
+                delta_table.update().await?;
                 println!("delta table version: {} for key: {}", version, key);
 
                 if let Some(checkpoint) = checkpoint {
                     if delta_table.version() % checkpoint as i64 == 0 {
                         println!("creating checkpoint for delta table");
-                        create_checkpoint(&delta_table).await.context(format!("could not create checkpoint for delta for key: {}", key))?;
+                        create_checkpoint(&delta_table).await?;
                     }
                 }
             }
         } else {
-            println!("no data to write found for delta table");
+            println!("no data for writing found for delta table");
         }
         
         Ok(())
