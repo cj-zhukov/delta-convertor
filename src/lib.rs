@@ -10,8 +10,7 @@ use std::ops::Deref;
 use std::io::Cursor;
 use std::sync::Arc;
 
-use aws_config::meta::region::RegionProviderChain;
-use aws_config::BehaviorVersion;
+use aws_config::{BehaviorVersion, Region};
 use aws_sdk_s3::Client;
 use aws_sdk_s3::operation::get_object::GetObjectOutput;
 use tokio_stream::StreamExt;
@@ -28,16 +27,19 @@ use deltalake::kernel::Action;
 use deltalake::{open_table_with_storage_options, DeltaTable};
 use deltalake::writer::{RecordBatchWriter, DeltaWriter};
 
-const AWS_MAX_RETRIES: u32 = 10;
-const DELTA_MAX_RETRIES: usize = 30; 
-const ASYNC_WORKERS: usize = 1;
-const DEBUG: bool = false;
+pub const AWS_MAX_RETRIES: u32 = 10;
+pub const DELTA_MAX_RETRIES: usize = 30; 
+pub const ASYNC_WORKERS: usize = 1;
+pub const DYNAMO_TABLE: &str = "delta_log";
+pub const DEFAULT_REGION: &str = "eu-central-1";
+pub const AWS_S3_LOCKING_PROVIDER: &str = "dynamodb";
+pub const DEBUG: bool = false;
 
 pub fn register_handlers() {
     deltalake::aws::register_handlers(None);
 }
 
-pub async fn init(client: Client, config: &Config) -> Result<()> {
+pub async fn init(client: Client, config: Config, backend_config: HashMap<String, String>) -> Result<()> {
     let mut stream = client
         .list_objects_v2()
         .bucket(&config.bucket_source)
@@ -58,7 +60,6 @@ pub async fn init(client: Client, config: &Config) -> Result<()> {
     }
 
     if let Some(key) = keys.get(0) {
-        let backend_config = backend_config(None, None, None);
         let table_uri = format!("s3://{}/{}", &config.bucket_target, &config.prefix_target);
         let partition_columns = &config.args.partition_columns;
         println!("reading parquet file: {}", key);
@@ -74,7 +75,7 @@ pub async fn init(client: Client, config: &Config) -> Result<()> {
     Ok(())
 }
 
-pub async fn process(client: Client, config: &Config) -> Result<()> {
+pub async fn process(client: Client, config: Config, backend_config: HashMap<String, String>) -> Result<()> {
     println!("reading keys in prefix: {}", config.prefix_source);
     let mut stream = client
         .list_objects_v2()
@@ -98,7 +99,6 @@ pub async fn process(client: Client, config: &Config) -> Result<()> {
         keys = keys.into_iter().take(10).collect::<Vec<_>>();
     }
     println!("found: {} keys in prefix: {}", keys.len(), config.prefix_source);
-    let backend_config = backend_config(None, None, None);
     let table_uri = format!("s3://{}/{}", &config.bucket_target, &config.prefix_target);
     let partition_columns = &config.args.partition_columns;
     let checkpoint = &config.args.checkpoint;
@@ -141,7 +141,7 @@ pub async fn process(client: Client, config: &Config) -> Result<()> {
             match res {
                 Ok(res) => match res {
                     Ok(_) => (),
-                    Err(e) => println!("failed writing to delta table: {}", e),
+                    Err(e) => eprintln!("failed writing to delta table: {}", e),
                 }
                 Err(e) => eprintln!("failed running tokio task: {}", e),
             }
@@ -175,9 +175,11 @@ async fn processor(
     Ok(())
 }
 
-pub async fn get_aws_client() -> Client {
-    let region_provider = RegionProviderChain::default_provider().or_else("eu-central-1");
-    let config = aws_config::defaults(BehaviorVersion::v2023_11_09()).region(region_provider).load().await;
+pub async fn get_aws_client(region: &str) -> Client {
+    let config = aws_config::defaults(BehaviorVersion::v2023_11_09())
+        .region(Region::new(region.to_string()))
+        .load()
+        .await;
     let client = Client::from_conf(
         aws_sdk_s3::config::Builder::from(&config)
             .retry_config(aws_config::retry::RetryConfig::standard()
@@ -209,11 +211,11 @@ async fn read_file(client: Client, bucket: &str, key: &str) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-fn backend_config(region: Option<&str>, provider: Option<&str>, table_name: Option<&str>) -> HashMap<String, String> {
+pub fn backend_config(region: Option<String>, provider: Option<String>, table_name: Option<String>) -> HashMap<String, String> {
     HashMap::from([
-        ("AWS_REGION".to_string(), region.unwrap_or("eu-central-1").to_string()),
-        ("AWS_S3_LOCKING_PROVIDER".to_string(), provider.unwrap_or("dynamodb").to_string()),
-        ("DELTA_DYNAMO_TABLE_NAME".to_string(), table_name.unwrap_or("delta_log").to_string()),
+        ("AWS_REGION".to_string(), region.unwrap_or(DEFAULT_REGION.to_string())),
+        ("AWS_S3_LOCKING_PROVIDER".to_string(), provider.unwrap_or(AWS_S3_LOCKING_PROVIDER.to_string())),
+        ("DELTA_DYNAMO_TABLE_NAME".to_string(), table_name.unwrap_or(DYNAMO_TABLE.to_string())),
     ])
 }
 

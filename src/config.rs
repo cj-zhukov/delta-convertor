@@ -45,6 +45,8 @@ pub struct Args {
     pub mode: String, // delta-convertor mode init or append
     pub checkpoint: Option<usize>, // create checkpoint after n delta version
     pub debug: Option<bool>, // testing process n files 
+    pub dynamo_table_name: String, // dynamo table name for locking mechanizm
+    pub region: String, // region name
 }
 
 impl Config {
@@ -65,7 +67,8 @@ impl Config {
 
 impl std::fmt::Display for Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "config: item_name={} bucket_source={} bucket_target={} prefix_source={} prefix_target={} workers={:?} partitions={:?} chunk_size={:?} checkpoint={:?} mode={:?} debug={:?}",
+        write!(f, "config: item_name: {} bucket_source: {} bucket_target: {} prefix_source: {} prefix_target: {} \
+        workers: {:?} partitions: {:?} chunk_size: {:?} checkpoint: {:?} mode: {:?} dynamo_table: {} region: {} debug: {:?}",
         self.item_name, 
         self.bucket_source, 
         self.bucket_target, 
@@ -76,6 +79,8 @@ impl std::fmt::Display for Config {
         self.args.chunk_size,
         self.args.checkpoint,
         self.args.mode,
+        self.args.dynamo_table_name,
+        self.args.region,
         self.args.debug,
         )
     }
