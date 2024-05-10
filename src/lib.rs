@@ -50,7 +50,7 @@ pub async fn init(client: Client, config: Config, backend_config: HashMap<String
 
     let mut keys = Vec::new();
     while let Some(objects) = stream.next().await.transpose()? {
-        for object in objects.contents().to_owned() {
+        for object in objects.contents().iter().cloned() {
             if let Some(key) = object.key {
                 if key.ends_with("parquet") {
                     keys.push(key);
@@ -59,7 +59,7 @@ pub async fn init(client: Client, config: Config, backend_config: HashMap<String
         }
     }
 
-    if let Some(key) = keys.get(0) {
+    if let Some(key) = keys.first() {
         let table_uri = format!("s3://{}/{}", &config.bucket_target, &config.prefix_target);
         let partition_columns = &config.args.partition_columns;
         println!("reading parquet file: {}", key);
@@ -86,7 +86,7 @@ pub async fn process(client: Client, config: Config, backend_config: HashMap<Str
 
     let mut keys = Vec::new();
     while let Some(objects) = stream.next().await.transpose()? {
-        for object in objects.contents().to_owned() {
+        for object in objects.contents().iter().cloned() {
             if let Some(key) = object.key {
                 if key.ends_with("parquet") {
                     keys.push(key);
@@ -95,7 +95,7 @@ pub async fn process(client: Client, config: Config, backend_config: HashMap<Str
         }
     }
 
-    if config.args.debug.unwrap_or(DEBUG) == true {
+    if config.args.debug.unwrap_or(DEBUG) {
         keys = keys.into_iter().take(10).collect::<Vec<_>>();
     }
     println!("found: {} keys in prefix: {}", keys.len(), config.prefix_source);
@@ -166,7 +166,7 @@ async fn processor(
     let data = read_file(client.clone(), &bucket, &key).await?;
     println!("creating data table from file: {}", key);
     let table = Table::new(data, chunk_size).await?;
-    if debug.unwrap_or(DEBUG) == true {
+    if debug.unwrap_or(DEBUG) {
         dbg!(table.metadata());
     }
     println!("writing to delta table from file: {}", key);
@@ -180,14 +180,13 @@ pub async fn get_aws_client(region: &str) -> Client {
         .region(Region::new(region.to_string()))
         .load()
         .await;
-    let client = Client::from_conf(
+
+    Client::from_conf(
         aws_sdk_s3::config::Builder::from(&config)
             .retry_config(aws_config::retry::RetryConfig::standard()
             .with_max_attempts(AWS_MAX_RETRIES))
             .build()
-    );
-
-    client
+    )
 }
 
 async fn get_file(client: Client, bucket: &str, key: &str) -> Result<GetObjectOutput> {
@@ -335,7 +334,7 @@ impl Table {
                     .iter() 
                     .map(|add| {
                         let clone = add.clone();
-                        Action::Add(clone.into())
+                        Action::Add(clone)
                     })
                     .collect::<Vec<_>>();
                 
