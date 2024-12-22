@@ -1,4 +1,11 @@
-use app::{Config, WorkMode, get_aws_client, init, process, register_handlers, backend_config};
+use app::{
+    init, 
+    process, 
+    register_handlers, 
+    utils::{backend_config, get_aws_client}, 
+    Config, 
+    WorkMode,
+};
 
 use std::time::Instant;
 
