@@ -1,9 +1,9 @@
-use crate::Result;
-
 use std::fmt::Debug;
 use std::env;
 
 use serde::Deserialize;
+
+use crate::error::DeltaConvertorError;
 
 struct Input {
     bucket_source: String,
@@ -15,7 +15,7 @@ struct Input {
 }
 
 impl Input {
-    fn new() -> Result<Self> {
+    fn new() -> Result<Self, DeltaConvertorError> {
         let bucket_source = env::var("bucket_source")?;
         let bucket_target = env::var("bucket_target")?;
         let prefix_source = env::var("prefix_source")?;
@@ -50,7 +50,7 @@ pub struct Args {
 }
 
 impl Config {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> Result<Self, DeltaConvertorError> {
         let input = Input::new()?;
         let args: Args = serde_json::from_str(&input.args)?;
 

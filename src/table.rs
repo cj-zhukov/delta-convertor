@@ -3,7 +3,6 @@ use std::ops::Deref;
 use std::io::Cursor;
 use std::sync::Arc;
 
-use anyhow::Result;
 use tokio_stream::StreamExt;
 use arrow::{
     record_batch::RecordBatch,
@@ -18,6 +17,7 @@ use deltalake::kernel::Action;
 use deltalake::{open_table_with_storage_options, DeltaTable};
 use deltalake::writer::{RecordBatchWriter, DeltaWriter};
 
+use crate::error::DeltaConvertorError;
 use crate::utils::DELTA_MAX_RETRIES;
 
 pub struct Table {
@@ -41,7 +41,7 @@ impl Table {
         println!("Schema: {:?}", &self.schema);
     }
 
-    pub async fn new(data: Vec<u8>, chunk_size: Option<usize>) -> Result<Self> {
+    pub async fn new(data: Vec<u8>, chunk_size: Option<usize>) -> Result<Self, DeltaConvertorError> {
         let chunk_size = chunk_size.unwrap_or(1024);
         let cursor = Cursor::new(data);
         let mut reader = ParquetRecordBatchStreamBuilder::new(cursor)
@@ -62,7 +62,7 @@ impl Table {
         Ok(Self { schema, data: Some(data), rows: Some(rows), columns: Some(columns), chunk_size: Some(chunk_size) })
     }
 
-    pub async fn init(data: Vec<u8>, chunk_size: Option<usize>) -> Result<Self> {
+    pub async fn init(data: Vec<u8>, chunk_size: Option<usize>) -> Result<Self, DeltaConvertorError> {
         let chunk_size = chunk_size.unwrap_or(1024);
         let cursor = Cursor::new(data);
         let reader = ParquetRecordBatchStreamBuilder::new(cursor)
@@ -80,7 +80,7 @@ impl Table {
         table_uri: &str, 
         partition_columns: Option<Vec<String>>, 
         backend_config: HashMap<String, String>,
-    ) -> Result<DeltaTable> {
+    ) -> Result<DeltaTable, DeltaConvertorError> {
         let delta_schema = <deltalake::kernel::Schema as TryFrom<&Schema>>::try_from(&self.schema)?;
         let fields = delta_schema.fields().to_owned();
         let builder = match partition_columns {
@@ -109,7 +109,7 @@ impl Table {
         backend_config: HashMap<String, String>, 
         key: &str, 
         checkpoint: Option<usize>,
-    ) -> Result<()> {
+    ) -> Result<(), DeltaConvertorError> {
         if let Some(record_batches) = &self.data {
             let mut writer = RecordBatchWriter::try_new(table_uri, Arc::new(self.schema.clone()), partition_columns.clone(), Some(backend_config.clone()))?;
             let mut delta_table = open_table_with_storage_options(table_uri, backend_config.clone()).await?;

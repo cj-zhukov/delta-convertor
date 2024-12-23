@@ -1,16 +1,18 @@
+use std::time::Instant;
+
+use color_eyre::Result;
+
 use app::{
     init, 
     process, 
     register_handlers, 
-    utils::{backend_config, get_aws_client}, 
-    Config, 
+    utils::{backend_config, get_aws_client, Config}, 
     WorkMode,
 };
 
-use std::time::Instant;
-
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
+    color_eyre::install()?;
     let now = Instant::now();
     let config = Config::new()?;
     println!("{}", config);

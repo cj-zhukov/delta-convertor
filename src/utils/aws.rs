@@ -1,4 +1,4 @@
-use anyhow::Result;
+use crate::error::DeltaConvertorError;
 use aws_config::{BehaviorVersion, Region};
 use aws_sdk_s3::Client;
 use aws_sdk_s3::operation::get_object::GetObjectOutput;
@@ -6,7 +6,7 @@ use aws_sdk_s3::operation::get_object::GetObjectOutput;
 use super::AWS_MAX_RETRIES;
 
 pub async fn get_aws_client(region: &str) -> Client {
-    let config = aws_config::defaults(BehaviorVersion::v2023_11_09())
+    let config = aws_config::defaults(BehaviorVersion::latest())
         .region(Region::new(region.to_string()))
         .load()
         .await;
@@ -19,7 +19,7 @@ pub async fn get_aws_client(region: &str) -> Client {
     )
 }
 
-async fn get_file(client: Client, bucket: &str, key: &str) -> Result<GetObjectOutput> {
+async fn get_file(client: Client, bucket: &str, key: &str) -> Result<GetObjectOutput, DeltaConvertorError> {
     let resp = client
         .get_object()
         .bucket(bucket)
@@ -30,7 +30,7 @@ async fn get_file(client: Client, bucket: &str, key: &str) -> Result<GetObjectOu
     Ok(resp)
 } 
 
-pub async fn read_file(client: Client, bucket: &str, key: &str) -> Result<Vec<u8>> {
+pub async fn read_file(client: Client, bucket: &str, key: &str) -> Result<Vec<u8>, DeltaConvertorError> {
     let mut buf = Vec::new();
     let mut object = get_file(client, bucket, key).await?;
     while let Some(bytes) = object.body.try_next().await? {

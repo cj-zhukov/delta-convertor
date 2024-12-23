@@ -1,23 +1,24 @@
 use std::collections::HashMap;
 
-use anyhow::Result;
 use aws_sdk_s3::Client;
 use table::Table;
 use tokio::task::JoinSet;
 
 pub mod table;
 pub mod error;
-// pub use error::{Result, Error};
-pub mod config;
-pub use config::Config;
-use utils::{read_file, ASYNC_WORKERS, DEBUG};
+pub use error::DeltaConvertorError;
+use utils::{read_file, ASYNC_WORKERS, DEBUG, Config};
 pub mod utils;
 
 pub fn register_handlers() {
     deltalake::aws::register_handlers(None);
 }
 
-pub async fn init(client: Client, config: Config, backend_config: HashMap<String, String>) -> Result<()> {
+pub async fn init(
+    client: Client, 
+    config: Config, 
+    backend_config: HashMap<String, String>,
+) -> Result<(), DeltaConvertorError> {
     let mut stream = client
         .list_objects_v2()
         .bucket(&config.bucket_source)
@@ -30,7 +31,7 @@ pub async fn init(client: Client, config: Config, backend_config: HashMap<String
     while let Some(objects) = stream.next().await.transpose()? {
         for object in objects.contents().iter().cloned() {
             if let Some(key) = object.key {
-                if key.ends_with("parquet") {
+                if key.ends_with(".parquet") {
                     keys.push(key);
                 }
             }
@@ -47,14 +48,18 @@ pub async fn init(client: Client, config: Config, backend_config: HashMap<String
         println!("creating table: {} prefix: {}", config.item_name, table_uri);
         table.create_delta_table(&table_uri, partition_columns.clone(), backend_config.clone()).await?;
     } else {
-        // return Err(Error::Custom("no parquet files found for processing".into()));
-        return Err(anyhow::anyhow!("no parquet files found for processing"));
+        eprintln!("no parquet files found for processing for path: s3://{}/{}", &config.bucket_source, &config.prefix_source);
+        return Err(DeltaConvertorError::NoParquetFilesFound);
     }
 
     Ok(())
 }
 
-pub async fn process(client: Client, config: Config, backend_config: HashMap<String, String>) -> Result<()> {
+pub async fn process(
+    client: Client, 
+    config: Config, 
+    backend_config: HashMap<String, String>,
+) -> Result<(), DeltaConvertorError> {
     println!("reading keys in prefix: {}", config.prefix_source);
     let mut stream = client
         .list_objects_v2()
@@ -140,7 +145,7 @@ async fn processor(
     chunk_size: Option<usize>,
     checkpoint: Option<usize>,
     debug: Option<bool>,
-    ) -> Result<()> {
+    ) -> Result<(), DeltaConvertorError> {
     println!("reading parquet file: {}", key);
     let data = read_file(client.clone(), &bucket, &key).await?;
     println!("creating data table from file: {}", key);
