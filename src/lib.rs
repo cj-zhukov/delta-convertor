@@ -164,6 +164,15 @@ pub enum WorkMode {
     Init, 
 }
 
+impl AsRef<str> for WorkMode {
+    fn as_ref(&self) -> &str {
+        match *self {
+            Self::Append => "append",
+            Self::Init => "init",
+        }
+    }
+}
+
 impl WorkMode {
     pub fn new(name: &str) -> Option<Self> {
         match name {
@@ -173,13 +182,6 @@ impl WorkMode {
                 println!("unknown mode: {} ", name);
                 None
             }
-        }
-    }
-
-    pub fn value(&self) -> &str {
-        match *self {
-            Self::Append => "append",
-            Self::Init => "init",
         }
     }
 }

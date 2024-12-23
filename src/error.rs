@@ -5,7 +5,7 @@ use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::put_object::PutObjectError;
 use aws_smithy_types::byte_stream::error::Error as AwsSmithyError;
-use color_eyre::{Result, Report};
+use color_eyre::Report;
 use parquet::errors::ParquetError;
 use deltalake::arrow::error::ArrowError;
 use deltalake::{DeltaTableError, protocol::ProtocolError};

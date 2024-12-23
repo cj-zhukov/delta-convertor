@@ -17,7 +17,7 @@ async fn main() -> Result<()> {
     let config = Config::new()?;
     println!("{}", config);
     if let Some(mode) = WorkMode::new(&config.args.mode) {
-        println!("start processing item: {} with mode: {}", &config.item_name, mode.value());
+        println!("start processing item: {} with mode: {}", &config.item_name, mode.as_ref());
         register_handlers();
         let client = get_aws_client(&config.args.region).await;
         let backend_config = backend_config(Some(config.args.region.clone()), None, Some(config.args.dynamo_table_name.clone()));
