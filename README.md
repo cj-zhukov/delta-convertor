@@ -11,8 +11,10 @@ Delta tables can be queried with spark in DataBricks.
 Use the package manager cargo or docker to install delta-convertor.
 
 ## Modes overview
-init: initialization of empty delta table (you will see only _delta_log folder)
-append: read parquet files, convert to delta and write to delta table
+### init
+initialization of empty delta table (you will see only _delta_log folder)
+### append
+read parquet files, convert to delta and write to delta table
 
 ## How to use with AWS
 1) run delta-convertor with mode="init" for initialization empty delta table in AWS S3
