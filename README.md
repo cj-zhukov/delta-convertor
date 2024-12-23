@@ -18,3 +18,8 @@ append: read parquet files, convert to delta and write to delta table
 1) run delta-convertor with mode="init" for initialization empty delta table in AWS S3
 2) run AWS Crawler with delta source option for creating delta table in AWS Glue catalog (need to do it only once)
 3) run delta-convertor with mode="append" for writing parquet files from Data Lake to Delta Lake
+
+## How to read delta table with DataBricks
+```python
+df = spark.read.format("delta").load("path/to/data/")
+display(df.limit(100))
