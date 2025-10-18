@@ -173,15 +173,14 @@ impl AsRef<str> for WorkMode {
     }
 }
 
-impl WorkMode {
-    pub fn new(name: &str) -> Option<Self> {
-        match name {
-            "append" => Some(Self::Append),
-            "init" => Some(Self::Init),
-            _ => {
-                println!("unknown mode: {} ", name);
-                None
-            }
+impl TryFrom<&str> for WorkMode {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "append" => Ok(Self::Append),
+            "init" => Ok(Self::Init),
+            _ => Err(format!("unknown mode: {}", value))
         }
     }
 }
